@@ -64,18 +64,81 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.source_commit.outputs.sha }}
           BUNDLE_PATH: ${{ runner.temp }}/omnigraph-source.zip
+          BUILDSPEC_PATH: ${{ runner.temp }}/buildspec.generated.yml
         run: |
+          cat > "${BUILDSPEC_PATH}" <<'YAML'
+          version: 0.2
+
+          env:
+            shell: bash
+
+          phases:
+            install:
+              commands:
+                - set -euo pipefail
+                - dnf install -y clang gcc gcc-c++ make protobuf-compiler protobuf-devel tar gzip
+                - curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+                - source "$HOME/.cargo/env"
+                - rustc --version
+                - cargo --version
+            pre_build:
+              commands:
+                - set -euo pipefail
+                - source "$HOME/.cargo/env"
+                - cargo fetch --locked
+            build:
+              commands:
+                - set -euo pipefail
+                - source "$HOME/.cargo/env"
+                - test -n "${OMNIGRAPH_SOURCE_VERSION:-}"
+                - test -n "${OMNIGRAPH_ECR_REPOSITORY:-}"
+                - test -n "${OMNIGRAPH_ARTIFACT_BUCKET:-}"
+                - cargo build --release --locked -p omnigraph-cli -p omnigraph-server
+                - mkdir -p release
+                - install -m 0755 target/release/omnigraph release/omnigraph
+                - install -m 0755 target/release/omnigraph-server release/omnigraph-server
+                - tar -C release -czf release/omnigraph-linux-x86_64.tar.gz omnigraph omnigraph-server
+                - (cd release && sha256sum omnigraph-linux-x86_64.tar.gz > SHA256SUMS)
+                - account_id="$(aws sts get-caller-identity --query Account --output text)"
+                - registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                - image_uri="${registry}/${OMNIGRAPH_ECR_REPOSITORY}"
+                - aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${registry}"
+                - docker build -t "${image_uri}:${OMNIGRAPH_SOURCE_VERSION}" .
+                - docker push "${image_uri}:${OMNIGRAPH_SOURCE_VERSION}"
+                - |
+                  image_digest=""
+                  for _ in $(seq 1 10); do
+                    image_digest="$(aws ecr describe-images --repository-name "${OMNIGRAPH_ECR_REPOSITORY}" --image-ids imageTag="${OMNIGRAPH_SOURCE_VERSION}" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+                    if [ -n "${image_digest}" ] && [ "${image_digest}" != "None" ]; then
+                      break
+                    fi
+                    sleep 3
+                  done
+                  test -n "${image_digest}"
+                - image_ref="${image_uri}@${image_digest}"
+                - artifact_prefix="s3://${OMNIGRAPH_ARTIFACT_BUCKET}/builds/${OMNIGRAPH_SOURCE_VERSION}"
+                - printf '{"source_sha":"%s","image_ref":"%s","image_digest":"%s","artifact_prefix":"%s"}\n' "${OMNIGRAPH_SOURCE_VERSION}" "${image_ref}" "${image_digest}" "${artifact_prefix}" > release/image.json
+
+          artifacts:
+            files:
+              - omnigraph-linux-x86_64.tar.gz
+              - SHA256SUMS
+              - image.json
+            base-directory: release
+          YAML
           python3 - <<'PY'
           import os
           import subprocess
           import zipfile
 
           bundle_path = os.environ["BUNDLE_PATH"]
+          buildspec_path = os.environ["BUILDSPEC_PATH"]
           files = subprocess.check_output(["git", "ls-files", "-z"], text=False).decode().split("\0")
           with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
               for path in files:
                   if path:
                       archive.write(path, arcname=path)
+              archive.write(buildspec_path, arcname="buildspec.generated.yml")
           PY
           source_key="sources/${SOURCE_SHA}/omnigraph-source.zip"
           echo "path=${BUNDLE_PATH}" >> "$GITHUB_OUTPUT"
@@ -94,7 +157,7 @@ jobs:
             --project-name "${AWS_CODEBUILD_PACKAGE_PROJECT}" \
             --source-type-override S3 \
             --source-location-override "${AWS_ARTIFACT_BUCKET}/${{ steps.source_bundle.outputs.key }}" \
-            --buildspec-override buildspec.package.yml \
+            --buildspec-override buildspec.generated.yml \
             --environment-variables-override \
               name=OMNIGRAPH_SOURCE_VERSION,value="${{ steps.source_commit.outputs.sha }}",type=PLAINTEXT \
               name=OMNIGRAPH_ECR_REPOSITORY,value="${OMNIGRAPH_ECR_REPOSITORY}",type=PLAINTEXT \
