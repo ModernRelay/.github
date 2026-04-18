@@ -36,7 +36,11 @@ on:
 jobs:
   codebuild_package:
     name: Package via CodeBuild (AL2023)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # The actual compile + Docker build + ECR push all happen inside AWS
+    # CodeBuild (see `aws codebuild start-build` below). This runner only
+    # zips source, uploads to S3, triggers the CodeBuild job, and polls —
+    # light orchestration that doesn't need a premium runner.
+    runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
