@@ -101,47 +101,67 @@ jobs:
                 - cargo fetch --locked
             build:
               commands:
-                - set -euo pipefail
-                - source "$HOME/.cargo/env"
-                - test -n "${OMNIGRAPH_SOURCE_VERSION:-}"
-                - test -n "${OMNIGRAPH_ECR_REPOSITORY:-}"
-                - test -n "${OMNIGRAPH_ARTIFACT_BUCKET:-}"
-                - tag_suffix="${OMNIGRAPH_IMAGE_TAG_SUFFIX:-}"
+                # CodeBuild runs each `- <command>` in a fresh shell, so
+                # shell variables do NOT persist between list items. Env
+                # vars (from `env:` and the start-build overrides) DO
+                # survive. Keep the whole build phase in one multi-line
+                # block so intermediate shell state like image_tag and
+                # image_digest stays in scope end-to-end.
                 - |
+                  set -euo pipefail
+                  source "$HOME/.cargo/env"
+
+                  test -n "${OMNIGRAPH_SOURCE_VERSION:-}"
+                  test -n "${OMNIGRAPH_ECR_REPOSITORY:-}"
+                  test -n "${OMNIGRAPH_ARTIFACT_BUCKET:-}"
+
+                  tag_suffix="${OMNIGRAPH_IMAGE_TAG_SUFFIX:-}"
+                  image_tag="${OMNIGRAPH_SOURCE_VERSION}${tag_suffix}"
+                  archive_name="omnigraph-linux-x86_64${tag_suffix}.tar.gz"
+                  sums_name="SHA256SUMS${tag_suffix}"
+                  image_json_name="image${tag_suffix}.json"
+
                   features_arg=""
                   if [ -n "${OMNIGRAPH_FEATURES:-}" ]; then
                     features_arg="--features ${OMNIGRAPH_FEATURES}"
                   fi
-                  echo "Building omnigraph-server with features='${OMNIGRAPH_FEATURES:-}' tag_suffix='${tag_suffix}'"
+                  echo "Building omnigraph-server with features='${OMNIGRAPH_FEATURES:-}' tag_suffix='${tag_suffix}' image_tag='${image_tag}'"
                   cargo build --release --locked -p omnigraph-cli -p omnigraph-server $features_arg
-                - mkdir -p release
-                - install -m 0755 target/release/omnigraph release/omnigraph
-                - install -m 0755 target/release/omnigraph-server release/omnigraph-server
-                - archive_name="omnigraph-linux-x86_64${tag_suffix}.tar.gz"
-                - sums_name="SHA256SUMS${tag_suffix}"
-                - image_json_name="image${tag_suffix}.json"
-                - tar -C release -czf "release/${archive_name}" omnigraph omnigraph-server
-                - (cd release && sha256sum "${archive_name}" > "${sums_name}")
-                - account_id="$(aws sts get-caller-identity --query Account --output text)"
-                - registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-                - image_uri="${registry}/${OMNIGRAPH_ECR_REPOSITORY}"
-                - image_tag="${OMNIGRAPH_SOURCE_VERSION}${tag_suffix}"
-                - aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${registry}"
-                - docker build -t "${image_uri}:${image_tag}" .
-                - docker push "${image_uri}:${image_tag}"
-                - |
+
+                  mkdir -p release
+                  install -m 0755 target/release/omnigraph release/omnigraph
+                  install -m 0755 target/release/omnigraph-server release/omnigraph-server
+                  tar -C release -czf "release/${archive_name}" omnigraph omnigraph-server
+                  (cd release && sha256sum "${archive_name}" > "${sums_name}")
+
+                  account_id="$(aws sts get-caller-identity --query Account --output text)"
+                  registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                  image_uri="${registry}/${OMNIGRAPH_ECR_REPOSITORY}"
+
+                  aws ecr get-login-password --region "${AWS_REGION}" \
+                    | docker login --username AWS --password-stdin "${registry}"
+                  docker build -t "${image_uri}:${image_tag}" .
+                  docker push "${image_uri}:${image_tag}"
+
                   image_digest=""
                   for _ in $(seq 1 10); do
-                    image_digest="$(aws ecr describe-images --repository-name "${OMNIGRAPH_ECR_REPOSITORY}" --image-ids imageTag="${image_tag}" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+                    image_digest="$(aws ecr describe-images \
+                      --repository-name "${OMNIGRAPH_ECR_REPOSITORY}" \
+                      --image-ids imageTag="${image_tag}" \
+                      --query 'imageDetails[0].imageDigest' \
+                      --output text 2>/dev/null || true)"
                     if [ -n "${image_digest}" ] && [ "${image_digest}" != "None" ]; then
                       break
                     fi
                     sleep 3
                   done
                   test -n "${image_digest}"
-                - image_ref="${image_uri}@${image_digest}"
-                - artifact_prefix="s3://${OMNIGRAPH_ARTIFACT_BUCKET}/builds/${OMNIGRAPH_SOURCE_VERSION}"
-                - printf '{"source_sha":"%s","image_ref":"%s","image_digest":"%s","artifact_prefix":"%s","features":"%s","image_tag_suffix":"%s"}\n' "${OMNIGRAPH_SOURCE_VERSION}" "${image_ref}" "${image_digest}" "${artifact_prefix}" "${OMNIGRAPH_FEATURES:-}" "${tag_suffix}" > "release/${image_json_name}"
+
+                  image_ref="${image_uri}@${image_digest}"
+                  artifact_prefix="s3://${OMNIGRAPH_ARTIFACT_BUCKET}/builds/${OMNIGRAPH_SOURCE_VERSION}"
+                  printf '{"source_sha":"%s","image_ref":"%s","image_digest":"%s","artifact_prefix":"%s","features":"%s","image_tag_suffix":"%s"}\n' \
+                    "${OMNIGRAPH_SOURCE_VERSION}" "${image_ref}" "${image_digest}" "${artifact_prefix}" "${OMNIGRAPH_FEATURES:-}" "${tag_suffix}" \
+                    > "release/${image_json_name}"
 
           artifacts:
             files:
