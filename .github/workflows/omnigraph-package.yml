@@ -25,6 +25,16 @@ on:
         required: false
         type: string
         default: omnigraph-server
+      features:
+        description: Space-separated list of Cargo features to pass to `cargo build --features`. Leave empty for the default build.
+        required: false
+        type: string
+        default: ""
+      image_tag_suffix:
+        description: Suffix appended to the image tag (and release artifact name) to distinguish feature-enabled builds, e.g. `-aws`. Must be empty or start with `-`.
+        required: false
+        type: string
+        default: ""
 
 jobs:
   codebuild_package:
@@ -39,6 +49,8 @@ jobs:
       AWS_CODEBUILD_PACKAGE_PROJECT: ${{ inputs.aws_codebuild_package_project }}
       AWS_ARTIFACT_BUCKET: ${{ inputs.aws_artifact_bucket }}
       OMNIGRAPH_ECR_REPOSITORY: ${{ inputs.omnigraph_ecr_repository }}
+      OMNIGRAPH_FEATURES: ${{ inputs.features }}
+      OMNIGRAPH_IMAGE_TAG_SUFFIX: ${{ inputs.image_tag_suffix }}
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -93,22 +105,33 @@ jobs:
                 - test -n "${OMNIGRAPH_SOURCE_VERSION:-}"
                 - test -n "${OMNIGRAPH_ECR_REPOSITORY:-}"
                 - test -n "${OMNIGRAPH_ARTIFACT_BUCKET:-}"
-                - cargo build --release --locked -p omnigraph-cli -p omnigraph-server
+                - tag_suffix="${OMNIGRAPH_IMAGE_TAG_SUFFIX:-}"
+                - |
+                  features_arg=""
+                  if [ -n "${OMNIGRAPH_FEATURES:-}" ]; then
+                    features_arg="--features ${OMNIGRAPH_FEATURES}"
+                  fi
+                  echo "Building omnigraph-server with features='${OMNIGRAPH_FEATURES:-}' tag_suffix='${tag_suffix}'"
+                  cargo build --release --locked -p omnigraph-cli -p omnigraph-server $features_arg
                 - mkdir -p release
                 - install -m 0755 target/release/omnigraph release/omnigraph
                 - install -m 0755 target/release/omnigraph-server release/omnigraph-server
-                - tar -C release -czf release/omnigraph-linux-x86_64.tar.gz omnigraph omnigraph-server
-                - (cd release && sha256sum omnigraph-linux-x86_64.tar.gz > SHA256SUMS)
+                - archive_name="omnigraph-linux-x86_64${tag_suffix}.tar.gz"
+                - sums_name="SHA256SUMS${tag_suffix}"
+                - image_json_name="image${tag_suffix}.json"
+                - tar -C release -czf "release/${archive_name}" omnigraph omnigraph-server
+                - (cd release && sha256sum "${archive_name}" > "${sums_name}")
                 - account_id="$(aws sts get-caller-identity --query Account --output text)"
                 - registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
                 - image_uri="${registry}/${OMNIGRAPH_ECR_REPOSITORY}"
+                - image_tag="${OMNIGRAPH_SOURCE_VERSION}${tag_suffix}"
                 - aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${registry}"
-                - docker build -t "${image_uri}:${OMNIGRAPH_SOURCE_VERSION}" .
-                - docker push "${image_uri}:${OMNIGRAPH_SOURCE_VERSION}"
+                - docker build -t "${image_uri}:${image_tag}" .
+                - docker push "${image_uri}:${image_tag}"
                 - |
                   image_digest=""
                   for _ in $(seq 1 10); do
-                    image_digest="$(aws ecr describe-images --repository-name "${OMNIGRAPH_ECR_REPOSITORY}" --image-ids imageTag="${OMNIGRAPH_SOURCE_VERSION}" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+                    image_digest="$(aws ecr describe-images --repository-name "${OMNIGRAPH_ECR_REPOSITORY}" --image-ids imageTag="${image_tag}" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
                     if [ -n "${image_digest}" ] && [ "${image_digest}" != "None" ]; then
                       break
                     fi
@@ -117,13 +140,11 @@ jobs:
                   test -n "${image_digest}"
                 - image_ref="${image_uri}@${image_digest}"
                 - artifact_prefix="s3://${OMNIGRAPH_ARTIFACT_BUCKET}/builds/${OMNIGRAPH_SOURCE_VERSION}"
-                - printf '{"source_sha":"%s","image_ref":"%s","image_digest":"%s","artifact_prefix":"%s"}\n' "${OMNIGRAPH_SOURCE_VERSION}" "${image_ref}" "${image_digest}" "${artifact_prefix}" > release/image.json
+                - printf '{"source_sha":"%s","image_ref":"%s","image_digest":"%s","artifact_prefix":"%s","features":"%s","image_tag_suffix":"%s"}\n' "${OMNIGRAPH_SOURCE_VERSION}" "${image_ref}" "${image_digest}" "${artifact_prefix}" "${OMNIGRAPH_FEATURES:-}" "${tag_suffix}" > "release/${image_json_name}"
 
           artifacts:
             files:
-              - omnigraph-linux-x86_64.tar.gz
-              - SHA256SUMS
-              - image.json
+              - "**/*"
             base-directory: release
           YAML
           python3 - <<'PY'
@@ -162,6 +183,8 @@ jobs:
               name=OMNIGRAPH_SOURCE_VERSION,value="${{ steps.source_commit.outputs.sha }}",type=PLAINTEXT \
               name=OMNIGRAPH_ECR_REPOSITORY,value="${OMNIGRAPH_ECR_REPOSITORY}",type=PLAINTEXT \
               name=OMNIGRAPH_ARTIFACT_BUCKET,value="${AWS_ARTIFACT_BUCKET}",type=PLAINTEXT \
+              name=OMNIGRAPH_FEATURES,value="${OMNIGRAPH_FEATURES}",type=PLAINTEXT \
+              name=OMNIGRAPH_IMAGE_TAG_SUFFIX,value="${OMNIGRAPH_IMAGE_TAG_SUFFIX}",type=PLAINTEXT \
             --query 'build.id' \
             --output text)"
           echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
@@ -188,18 +211,20 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.source_commit.outputs.sha }}
           RELEASE_DIR: ${{ runner.temp }}/release
+          TAG_SUFFIX: ${{ inputs.image_tag_suffix }}
         run: |
           mkdir -p "${RELEASE_DIR}"
           base_uri="s3://${AWS_ARTIFACT_BUCKET}/builds/${SOURCE_SHA}"
-          aws s3 cp "${base_uri}/image.json" "${RELEASE_DIR}/image.json"
-          aws s3 cp "${base_uri}/omnigraph-linux-x86_64.tar.gz" "${RELEASE_DIR}/omnigraph-linux-x86_64.tar.gz"
-          aws s3 cp "${base_uri}/SHA256SUMS" "${RELEASE_DIR}/SHA256SUMS"
+          aws s3 cp "${base_uri}/image${TAG_SUFFIX}.json" "${RELEASE_DIR}/image${TAG_SUFFIX}.json"
+          aws s3 cp "${base_uri}/omnigraph-linux-x86_64${TAG_SUFFIX}.tar.gz" "${RELEASE_DIR}/omnigraph-linux-x86_64${TAG_SUFFIX}.tar.gz"
+          aws s3 cp "${base_uri}/SHA256SUMS${TAG_SUFFIX}" "${RELEASE_DIR}/SHA256SUMS${TAG_SUFFIX}"
 
       - name: Validate release manifest
         env:
           SOURCE_SHA: ${{ steps.source_commit.outputs.sha }}
           RELEASE_DIR: ${{ runner.temp }}/release
           AWS_ARTIFACT_BUCKET: ${{ inputs.aws_artifact_bucket }}
+          TAG_SUFFIX: ${{ inputs.image_tag_suffix }}
         run: |
           python3 - <<'PY'
           import json
@@ -208,7 +233,8 @@ jobs:
 
           source_sha = os.environ["SOURCE_SHA"]
           release_dir = Path(os.environ["RELEASE_DIR"])
-          payload = json.loads((release_dir / "image.json").read_text())
+          tag_suffix = os.environ.get("TAG_SUFFIX", "")
+          payload = json.loads((release_dir / f"image{tag_suffix}.json").read_text())
           required = ["source_sha", "image_ref", "image_digest", "artifact_prefix"]
           missing = [key for key in required if not payload.get(key)]
           if missing:
@@ -231,9 +257,9 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            ${{ runner.temp }}/release/image.json
-            ${{ runner.temp }}/release/omnigraph-linux-x86_64.tar.gz
-            ${{ runner.temp }}/release/SHA256SUMS
+            ${{ runner.temp }}/release/image${{ inputs.image_tag_suffix }}.json
+            ${{ runner.temp }}/release/omnigraph-linux-x86_64${{ inputs.image_tag_suffix }}.tar.gz
+            ${{ runner.temp }}/release/SHA256SUMS${{ inputs.image_tag_suffix }}
 
       - name: Print CodeBuild logs link
         if: always()
