@@ -9,18 +9,6 @@ on:
       source_ref:
         required: true
         type: string
-      aws_region:
-        required: true
-        type: string
-      aws_role_to_assume:
-        required: true
-        type: string
-      aws_codebuild_package_project:
-        required: true
-        type: string
-      aws_artifact_bucket:
-        required: true
-        type: string
       omnigraph_ecr_repository:
         required: false
         type: string
@@ -35,6 +23,15 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      AWS_REGION:
+        required: true
+      AWS_ROLE_TO_ASSUME:
+        required: true
+      AWS_CODEBUILD_PACKAGE_PROJECT:
+        required: true
+      AWS_ARTIFACT_BUCKET:
+        required: true
 
 jobs:
   codebuild_package:
@@ -45,9 +42,9 @@ jobs:
       contents: read
       attestations: write
     env:
-      AWS_REGION: ${{ inputs.aws_region }}
-      AWS_CODEBUILD_PACKAGE_PROJECT: ${{ inputs.aws_codebuild_package_project }}
-      AWS_ARTIFACT_BUCKET: ${{ inputs.aws_artifact_bucket }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_CODEBUILD_PACKAGE_PROJECT: ${{ secrets.AWS_CODEBUILD_PACKAGE_PROJECT }}
+      AWS_ARTIFACT_BUCKET: ${{ secrets.AWS_ARTIFACT_BUCKET }}
       OMNIGRAPH_ECR_REPOSITORY: ${{ inputs.omnigraph_ecr_repository }}
       OMNIGRAPH_FEATURES: ${{ inputs.features }}
       OMNIGRAPH_IMAGE_TAG_SUFFIX: ${{ inputs.image_tag_suffix }}
@@ -55,7 +52,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ inputs.aws_role_to_assume }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Checkout source
