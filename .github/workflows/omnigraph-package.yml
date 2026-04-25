@@ -247,7 +247,6 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.source_commit.outputs.sha }}
           RELEASE_DIR: ${{ runner.temp }}/release
-          AWS_ARTIFACT_BUCKET: ${{ inputs.aws_artifact_bucket }}
           TAG_SUFFIX: ${{ inputs.image_tag_suffix }}
         run: |
           python3 - <<'PY'
