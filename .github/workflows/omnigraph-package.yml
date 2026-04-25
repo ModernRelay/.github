@@ -163,10 +163,13 @@ jobs:
                     "${OMNIGRAPH_SOURCE_VERSION}" "${image_ref}" "${image_digest}" "${artifact_prefix}" "${OMNIGRAPH_FEATURES:-}" "${tag_suffix}" \
                     > "release/${image_json_name}"
 
-          artifacts:
-            files:
-              - "**/*"
-            base-directory: release
+                  # Upload artifacts to a deterministic per-SHA prefix that the
+                  # GHA caller fetches by exact path. Replaces reliance on the
+                  # CodeBuild project's `artifacts` config, which doesn't
+                  # template the source SHA into its destination.
+                  aws s3 cp "release/${image_json_name}" "${artifact_prefix}/${image_json_name}"
+                  aws s3 cp "release/${archive_name}"    "${artifact_prefix}/${archive_name}"
+                  aws s3 cp "release/${sums_name}"       "${artifact_prefix}/${sums_name}"
           YAML
           python3 - <<'PY'
           import os
