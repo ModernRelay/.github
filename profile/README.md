@@ -1,11 +1,7 @@
-<h1 align="center">
-  Context &amp;<br>
-  Coordination<br>
-  Infra
-</h1>
+<h1 align="center">Modern Relay</h1>
 
 <p align="center">
-  <strong>The context graph for agent-native teams.</strong><br>
+  <strong>Context &amp; Coordination Infra</strong><br>
   <sub>The governed foundation where agents, teams and systems share context, coordinate work and compound knowledge.</sub>
 </p>
 
