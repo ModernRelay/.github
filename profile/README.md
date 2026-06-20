@@ -1,4 +1,8 @@
-<h1 align="center">Modern Relay</h1>
+<h1 align="center">
+  Context &amp;<br>
+  Coordination<br>
+  Infra
+</h1>
 
 <p align="center">
   <strong>The context graph for agent-native teams.</strong><br>
