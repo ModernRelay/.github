@@ -13,7 +13,7 @@
 
 <hr>
 
-We build infrastructure for fleets of agents — the operational state and
+We build infrastructure for fleets of agents: the operational state and
 coordination layer where agents, teams, and systems share context, coordinate
 work, and compound knowledge over time. Own your context. Coordinate agents.
 Govern change. On infrastructure you own.
@@ -22,7 +22,7 @@ Govern change. On infrastructure you own.
 
 | Project | What it is |
 |---|---|
-| **[omnigraph](https://github.com/ModernRelay/omnigraph)** | Lakehouse-native graph database for context assembly & multi-agent coordination — Git-style branching, multimodal retrieval, policy-as-code, object-storage native. |
+| **[omnigraph](https://github.com/ModernRelay/omnigraph)** | Lakehouse-native graph database for context assembly & multi-agent coordination. Git-style branching, multimodal retrieval, policy-as-code, object-storage native. |
 | **[omnigraph-ts](https://github.com/ModernRelay/omnigraph-ts)** | TypeScript SDK for the Omnigraph HTTP API. |
 | **[omnigraph-cookbooks](https://github.com/ModernRelay/omnigraph-cookbooks)** | Graph starters and skills built for Omnigraph, including an AI-industry-intelligence reference starter. |
 
