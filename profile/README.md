@@ -24,6 +24,7 @@ Govern change. On infrastructure you own.
 |---|---|
 | **[omnigraph](https://github.com/ModernRelay/omnigraph)** | Lakehouse-native graph database for context assembly & multi-agent coordination. Git-style branching, multimodal retrieval, policy-as-code, object-storage native. |
 | **[omnigraph-ts](https://github.com/ModernRelay/omnigraph-ts)** | TypeScript SDK for the Omnigraph HTTP API. |
+| **[omnigraph-py](https://github.com/ModernRelay/omnigraph-python)** | Python SDK for the Omnigraph HTTP API |
 | **[omnigraph-cookbooks](https://github.com/ModernRelay/omnigraph-cookbooks)** | Graph starters and skills built for Omnigraph, including an AI-industry-intelligence reference starter. |
 
 ## Get started
